@@ -1,0 +1,59 @@
+🚨 ROOT ISSUE
+
+You now have 2 environments mixed:
+
+Env	Python	Status
+old dbt_env	3.13 ❌	causing errors
+new dbt_env	3.11 ✅	correct one
+🟢 STEP 1 — Go to project root
+cd ~/Documents/Funnel_pipeline_updraded/project
+🟡 STEP 2 — DELETE OLD ENV (IMPORTANT)
+rm -rf dbt_env
+
+👉 This removes Python 3.13 confusion completely
+
+🔵 STEP 3 — CREATE NEW ENV (Python 3.11)
+python3.11 -m venv dbt_env
+🟣 STEP 4 — ACTIVATE
+source dbt_env/bin/activate
+🟠 STEP 5 — INSTALL EVERYTHING (ONE TIME)
+pip install --upgrade pip
+pip install pandas sqlalchemy pymysql
+pip install dbt-core dbt-mysql
+pip install "protobuf<5"
+🧪 STEP 6 — VERIFY PYTHON VERSION
+python --version
+
+👉 MUST show:
+
+Python 3.11.x
+🧪 STEP 7 — TEST IMPORTS
+python
+
+Then:
+
+import pandas
+import sqlalchemy
+import pymysql
+
+👉 No error = ✅ perfect
+
+▶️ STEP 8 — RUN PIPELINE
+python scripts/pipeline.py
+💥 WHY THIS WILL FIX EVERYTHING
+
+You eliminate:
+
+❌ Python version conflict
+❌ Missing packages
+❌ Multiple environments confusion
+
+👉 One clean environment = stable system
+
+🧠 IMPORTANT LESSON
+
+This is real-world data engineering problem:
+
+Environment issues > code issues
+
+Even senior engineers face this daily.

@@ -1,0 +1,15 @@
+# Ignore data files
+project/data/
+
+# Ignore logs
+project/logs/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Env files
+.env
+
+# Mac files
+.DS_Store

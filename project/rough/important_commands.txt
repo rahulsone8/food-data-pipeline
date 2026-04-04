@@ -1,0 +1,44 @@
+source dbt_env/bin/activate
+
+Every time you start working:
+cd your_project
+source dbt_env/bin/activate
+Then run anything:
+
+python scripts/pipeline.py
+dbt run
+🧠 THINK LIKE THIS
+
+👉 Virtual environment = your project’s private room
+
+You setup it once
+Then just enter the room every time
+No need to rebuild the room daily
+
+-----------------------------------
+-----------------------------------
+
+🔧 WHAT YOU DID
+1. Created environment
+python3 -m venv dbt_env
+
+👉 Created a clean Python space
+
+2. Activated it
+source dbt_env/bin/activate
+
+👉 Now you are “inside the room”
+
+3. Installed libraries
+pip install pandas sqlalchemy dbt-core dbt-mysql
+
+👉 Installed tools only inside this environment
+
+4. Fixed VS Code
+
+You told VS Code:
+
+👉 “Use THIS Python (dbt_env), not system Python”
+
+-----------------------------------
+-----------------------------------
