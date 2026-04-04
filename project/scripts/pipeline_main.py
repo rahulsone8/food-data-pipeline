@@ -1,43 +1,15 @@
 """
 =============================================================================
- FOOD DELIVERY ANALYTICS PIPELINE — v5.0
+ FOOD DELIVERY ANALYTICS PIPELINE — v5.1
 =============================================================================
- Changes from v4:
-   5. NEW TABLES: fact_campaigns + agg_campaign_performance
-        Campaign report CSVs (one file per campaign batch).
-        Filename IS the campaign_name — extracted automatically.
+ Changes from v5.0:
+   - FIXED: Campaign files are now .xlsx format (not .csv)
+   - Pattern: cmp_*.xlsx (e.g., cmp_swh30_shawarmahouse.xlsx)
+   - Campaign name extracted: cmp_swh30_shawarmahouse.xlsx → "swh30_shawarmahouse"
+   - Uses pd.read_excel() instead of pd.read_csv()
+   - Archive pattern updated to handle .xlsx files
 
-        Supported filename patterns:
-          {name}_xlsx_-_report.csv   → campaign_name = {name}
-          {name}_-_report.csv        → campaign_name = {name}
-          {name}.csv                 → campaign_name = {name}
-        Examples:
-          mfc_swayowhatsapp_xlsx_-_report.csv    → "mfc_swayowhatsapp"
-          just_fresh_point_march_-_report.csv    → "just_fresh_point_march"
-          shawarma_house_diwali_-_report.csv     → "shawarma_house_diwali"
-
-        fact_campaigns: one row per recipient per campaign message
-          campaign_name, campaign_id, mobile_number, scheduled_at,
-          sent_at, delivered_at, read_at,
-          is_sent, is_delivered, is_read, delivery_status,
-          pitch_response, loaded_at
-
-        agg_campaign_performance: one row per campaign_id
-          campaign_name, campaign_id, scheduled_date,
-          total_recipients, sent_count, delivered_count, read_count,
-          sent_rate_pct, delivered_rate_pct, read_rate_pct,
-          orders_after_24h  ← customers who placed ORDER in fact_funnel_wa
-                               within 24 hours of read_at
-          conversion_rate_pct
-
-        JOIN CHAIN (future Tableau use):
-          fact_campaigns.mobile_number
-              → fact_funnel_wa.customer_contact  (who browsed after campaign)
-              → fact_funnel_wa WHERE action='ORDER' (who actually ordered)
-          fact_campaigns.campaign_id
-              → fact_funnel_wa.campaign_id       (same campaign triggered the funnel)
-
- MySQL tables (11 from v4 + 2 new = 13 total):
+ MySQL tables (13 total):
    dim_restaurants          one row per restaurant (shop_id PK)
    dim_customers            one row per customer
    fact_orders              one row per order — all platforms
@@ -45,12 +17,12 @@
    fact_order_geo           one row per order — location/distance data
    fact_funnel              Swayo App funnel events (45,102 rows)
    fact_funnel_wa           WhatsApp funnel events (9,621 rows)
-   fact_campaigns           one row per campaign message recipient  ← NEW
+   fact_campaigns           one row per campaign message recipient  ← .xlsx files
    agg_platform_daily       daily KPIs by platform
    agg_restaurant_daily     daily KPIs by restaurant
    agg_funnel_conversion    Swayo App funnel conversion rates
    agg_customer_behavior    customer loyalty segments
-   agg_campaign_performance campaign delivery + conversion KPIs    ← NEW
+   agg_campaign_performance campaign delivery + conversion KPIs
 =============================================================================
 """
 
@@ -196,7 +168,7 @@ def load_files():
     response_files  = glob.glob(f"{RAW}/response*.csv")
     funnel_files    = glob.glob(f"{RAW}/funnelanalysis*.csv")
     wa_funnel_files = glob.glob(f"{RAW}/datewise_funnelanalysis_wa*.csv")
-    campaign_files  = glob.glob(f"{RAW}/*_report.csv")   # ← all campaign report CSVs
+    campaign_files  = glob.glob(f"{RAW}/cmp_*.xlsx")   # ← FIXED: .xlsx files
 
     if not data_files:
         log("No data*.csv found — pipeline exiting.", "warning")
@@ -208,7 +180,7 @@ def load_files():
     f4 = pd.read_csv(wa_funnel_files[0], low_memory=False) if wa_funnel_files else pd.DataFrame()
 
     for df in [f1, f2, f3, f4]:
-        df.columns = df.columns.str.strip()
+        df.columns = [str(col).strip() for col in df.columns]
 
     log(f"  Loaded → data:{len(f1)} | response:{len(f2)} | "
         f"app_funnel:{len(f3)} | wa_funnel:{len(f4)} | "
@@ -454,7 +426,7 @@ def build_fact_order_items(f1: pd.DataFrame, f2: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 7 — FACT: ORDER GEO  ← NEW TABLE
+# STEP 7 — FACT: ORDER GEO
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_fact_order_geo(
@@ -620,7 +592,7 @@ def build_fact_funnel_app(f3: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 9 — FACT: FUNNEL WA  ← NEW TABLE
+# STEP 9 — FACT: FUNNEL WA
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_fact_funnel_wa(
@@ -714,33 +686,37 @@ def build_fact_funnel_wa(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 10 — FACT: CAMPAIGNS  ← NEW
+# STEP 10 — FACT: CAMPAIGNS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_campaign_name(filepath: str) -> str:
     """
-    Derive campaign_name from filename — the filename IS the campaign identifier.
-
-    Supported patterns (all → strip extension + report suffix):
-      mfc_swayowhatsapp_xlsx_-_report.csv   → "mfc_swayowhatsapp"
-      just_fresh_point_march_-_report.csv   → "just_fresh_point_march"
-      shawarma_house_diwali.csv             → "shawarma_house_diwali"
-      food_court_weekend_offer_-_report.csv → "food_court_weekend_offer"
+    Derive campaign_name from filename.
+    
+    Pattern: cmp_swh30_shawarmahouse.xlsx → "swh30_shawarmahouse"
+    
+    Rules:
+    - Strip "cmp_" prefix
+    - Strip ".xlsx" extension
+    - Return the middle part as campaign_name
     """
     import re as _re
     stem = os.path.basename(filepath)
-    stem = _re.sub(r"\.csv$", "", stem, flags=_re.IGNORECASE)
-    stem = _re.sub(r"_xlsx_-_report$", "", stem)   # pattern 1
-    stem = _re.sub(r"_-_report$",      "", stem)   # pattern 2
-    stem = _re.sub(r"_report$",        "", stem)   # pattern 3
-    stem = _re.sub(r"_+", "_", stem).strip("_")
+    stem = _re.sub(r"\.xlsx$", "", stem, flags=_re.IGNORECASE)  # Remove .xlsx
+    stem = _re.sub(r"^cmp_", "", stem)                           # Remove cmp_ prefix
+    stem = _re.sub(r"_+", "_", stem).strip("_")                  # Clean up underscores
     return stem
 
 
 def build_fact_campaigns(campaign_files: list) -> pd.DataFrame:
     """
-    Load all campaign report CSVs.
-    campaign_name is extracted from each filename — no manual input needed.
+    Load all campaign report Excel files (.xlsx).
+    campaign_name is extracted from filename: cmp_swh30_shawarmahouse.xlsx → "swh30_shawarmahouse"
+    
+    Expected Excel columns:
+      Campaign Id, Mobile Number, Scheduled Date, Scheduled Time,
+      Sent, Delivered, Read, 1st Pitch Response
+    
     Columns:
       campaign_name, campaign_id, mobile_number, scheduled_date, scheduled_time,
       scheduled_at, sent_at, delivered_at, read_at,
@@ -758,8 +734,8 @@ def build_fact_campaigns(campaign_files: list) -> pd.DataFrame:
         log(f"  Loading campaign: '{campaign_name}' ← {os.path.basename(filepath)}")
 
         try:
-            df = pd.read_csv(filepath, low_memory=False)
-            df.columns = df.columns.str.strip()
+            df = pd.read_excel(filepath)  # ← CHANGED from read_csv to read_excel
+            df.columns = [str(col).strip() for col in df.columns]
         except Exception as e:
             log(f"  ERROR reading {filepath}: {e}", "error")
             continue
@@ -844,7 +820,7 @@ def build_fact_campaigns(campaign_files: list) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 11 — AGG: CAMPAIGN PERFORMANCE  ← NEW
+# STEP 11 — AGG: CAMPAIGN PERFORMANCE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_agg_campaign_performance(
@@ -941,7 +917,9 @@ def build_agg_campaign_performance(
     return agg
 
 
-
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 12 — AGG: OTHER TABLES
+# ─────────────────────────────────────────────────────────────────────────────
 
 def build_agg_platform_daily(fact_orders: pd.DataFrame) -> pd.DataFrame:
     agg = fact_orders.groupby(
@@ -1033,7 +1011,7 @@ def build_agg_customer_behavior(fact_orders: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 11 — ARCHIVE
+# STEP 13 — ARCHIVE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def archive_files():
@@ -1042,7 +1020,7 @@ def archive_files():
         f"{RAW}/response*.csv",
         f"{RAW}/funnelanalysis*.csv",
         f"{RAW}/datewise_funnelanalysis_wa*.csv",
-        f"{RAW}/*_report.csv",    # ← campaign report files
+        f"{RAW}/cmp_*.xlsx",    # ← ADDED: Archive campaign Excel files
     ]
     for pat in patterns:
         for f in glob.glob(pat):
@@ -1057,7 +1035,7 @@ def archive_files():
 
 def run_pipeline():
     log("\n" + "=" * 65)
-    log("PIPELINE v5.0 — START")
+    log("PIPELINE v5.1 — START")
     log("=" * 65)
 
     # 1. Load
@@ -1137,17 +1115,15 @@ def run_pipeline():
     log(f"  fact_order_geo         : {len(fact_order_geo):>7,}")
     log(f"  fact_funnel (app)      : {len(fact_funnel_app):>7,}")
     log(f"  fact_funnel_wa         : {len(fact_funnel_wa):>7,}")
-    log(f"  fact_campaigns         : {len(fact_campaigns) if not fact_campaigns.empty else 0:>7,}  ← NEW")
+    log(f"  fact_campaigns         : {len(fact_campaigns) if not fact_campaigns.empty else 0:>7,}  ← .xlsx")
     log(f"  agg_platform_daily     : {len(agg_platform):>7,}")
     log(f"  agg_restaurant_daily   : {len(agg_restaurant):>7,}")
     log(f"  agg_funnel_conversion  : {len(agg_funnel):>7,}")
     log(f"  agg_customer_behavior  : {len(agg_customers):>7,}")
     log(f"  agg_campaign_performance: {len(agg_campaign_perf) if not agg_campaign_perf.empty else 0:>6,}  ← NEW")
-    log(f"\n  TOTAL TABLES: 13  |  ✅ PIPELINE v5.0 COMPLETED")
+    log(f"\n  TOTAL TABLES: 13  |  ✅ PIPELINE v5.1 COMPLETED")
     log("=" * 65 + "\n")
 
 
 if __name__ == "__main__":
     run_pipeline()
-
-# Run:  python3 scripts/pipeline.py

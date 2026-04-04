@@ -507,3 +507,250 @@
   ✅ PIPELINE v3.0 COMPLETED SUCCESSFULLY
 2026-04-01 22:07:43,009 INFO  =================================================================
 
+2026-04-05 00:06:13,720 INFO  
+=================================================================
+2026-04-05 00:06:13,720 INFO  PIPELINE v5.0 — START
+2026-04-05 00:06:13,720 INFO  =================================================================
+2026-04-05 00:06:13,720 INFO  
+[1/12] Loading files...
+2026-04-05 00:06:13,982 INFO    Loaded → data:26325 | response:1163 | app_funnel:59303 | wa_funnel:117395 | campaign_files:0
+2026-04-05 00:06:13,983 INFO  
+[2/12] Building restaurant map from source files...
+2026-04-05 00:06:13,993 INFO    restaurant_map: 108 shops (from data.csv=108, new from response=0)
+2026-04-05 00:06:13,993 INFO  
+[3/12] Building dimension tables...
+2026-04-05 00:06:13,994 INFO    dim_restaurants: 108 rows
+2026-04-05 00:06:14,045 INFO    dim_customers: 3943 unique customers
+2026-04-05 00:06:14,045 INFO  
+[4/12] Building fact tables...
+2026-04-05 00:06:14,133 INFO    fact_orders: 11,619
+2026-04-05 00:06:14,133 INFO      gf_whatsapp:    9945
+2026-04-05 00:06:14,134 INFO      swayo_whatsapp: 511
+2026-04-05 00:06:14,134 INFO      swayo_app:      1162
+2026-04-05 00:06:14,157 INFO    fact_order_items: 26,329
+2026-04-05 00:06:14,258 INFO    fact_order_geo: 11,619 rows
+2026-04-05 00:06:14,258 INFO      with restaurant_pincode: 10332
+2026-04-05 00:06:14,259 INFO      with customer_pincode:   6332
+2026-04-05 00:06:14,259 INFO      with delivery_address:   10163
+2026-04-05 00:06:14,260 INFO  
+[5/12] Building funnel tables...
+2026-04-05 00:06:14,508 INFO    fact_funnel (app): 58,186 new rows (total clean: 58,186)
+2026-04-05 00:06:14,511 INFO      actions: {'PLP': 38298, 'VIEW_CART': 9869, 'PDP': 7942, 'CHECKOUT': 1443, 'ORDER': 634}
+2026-04-05 00:06:15,015 INFO    fact_funnel_wa: 117,395 new rows (total clean: 117,395)
+2026-04-05 00:06:15,022 INFO      actions: {'VIEW_CATALOG': 34035, 'VIEW_CART': 32564, 'TOFU': 24989, 'CHECKOUT': 12203, 'ORDER': 10113, 'QUERY': 3491}
+2026-04-05 00:06:15,026 INFO      unique customers: 8344
+2026-04-05 00:06:15,028 INFO      unique restaurants: 106
+2026-04-05 00:06:15,034 INFO  
+[6/12] Building campaign tables...
+2026-04-05 00:06:15,034 WARNING    fact_campaigns: no campaign report files found
+2026-04-05 00:06:15,035 INFO  
+[7/12] Building aggregation tables...
+2026-04-05 00:06:15,042 INFO    agg_platform_daily: 266
+2026-04-05 00:06:15,049 INFO    agg_restaurant_daily: 1,555
+2026-04-05 00:06:15,062 INFO    agg_funnel_conversion: 1,983
+2026-04-05 00:06:15,185 INFO    agg_customer_behavior: 3,942
+2026-04-05 00:06:15,186 INFO      {'One-time': 2037, 'Repeat': 1190, 'Loyal': 497, 'VIP': 218}
+2026-04-05 00:06:15,186 INFO  
+[8/12] Loading to MySQL...
+2026-04-05 00:06:15,829 INFO    dim_restaurants: 108 rows → MySQL [replace]
+2026-04-05 00:06:15,888 INFO    dim_customers: 3,943 rows → MySQL [replace]
+2026-04-05 00:06:16,547 INFO    fact_orders: 11,619 rows → MySQL [append]
+2026-04-05 00:06:16,785 INFO    fact_order_items: 26,329 rows → MySQL [append]
+2026-04-05 00:06:17,021 INFO    fact_order_geo: 11,619 rows → MySQL [append]
+2026-04-05 00:09:00,378 INFO  
+=================================================================
+2026-04-05 00:09:00,378 INFO  PIPELINE v5.0 — START
+2026-04-05 00:09:00,378 INFO  =================================================================
+2026-04-05 00:09:00,378 INFO  
+[1/12] Loading files...
+2026-04-05 00:09:00,634 INFO    Loaded → data:26325 | response:1163 | app_funnel:59303 | wa_funnel:117395 | campaign_files:0
+2026-04-05 00:09:00,634 INFO  
+[2/12] Building restaurant map from source files...
+2026-04-05 00:09:00,648 INFO    restaurant_map: 108 shops (from data.csv=108, new from response=0)
+2026-04-05 00:09:00,648 INFO  
+[3/12] Building dimension tables...
+2026-04-05 00:09:00,649 INFO    dim_restaurants: 108 rows
+2026-04-05 00:09:00,698 INFO    dim_customers: 3943 unique customers
+2026-04-05 00:09:00,698 INFO  
+[4/12] Building fact tables...
+2026-04-05 00:09:00,791 INFO    fact_orders: 11,619
+2026-04-05 00:09:00,792 INFO      gf_whatsapp:    9945
+2026-04-05 00:09:00,792 INFO      swayo_whatsapp: 511
+2026-04-05 00:09:00,793 INFO      swayo_app:      1162
+2026-04-05 00:09:00,817 INFO    fact_order_items: 26,329
+2026-04-05 00:09:00,925 INFO    fact_order_geo: 11,619 rows
+2026-04-05 00:09:00,926 INFO      with restaurant_pincode: 10332
+2026-04-05 00:09:00,926 INFO      with customer_pincode:   6332
+2026-04-05 00:09:00,926 INFO      with delivery_address:   10163
+2026-04-05 00:09:00,928 INFO  
+[5/12] Building funnel tables...
+2026-04-05 00:09:01,174 INFO    fact_funnel (app): 58,186 new rows (total clean: 58,186)
+2026-04-05 00:09:01,178 INFO      actions: {'PLP': 38298, 'VIEW_CART': 9869, 'PDP': 7942, 'CHECKOUT': 1443, 'ORDER': 634}
+2026-04-05 00:09:01,667 INFO    fact_funnel_wa: 117,395 new rows (total clean: 117,395)
+2026-04-05 00:09:01,673 INFO      actions: {'VIEW_CATALOG': 34035, 'VIEW_CART': 32564, 'TOFU': 24989, 'CHECKOUT': 12203, 'ORDER': 10113, 'QUERY': 3491}
+2026-04-05 00:09:01,679 INFO      unique customers: 8344
+2026-04-05 00:09:01,681 INFO      unique restaurants: 106
+2026-04-05 00:09:01,688 INFO  
+[6/12] Building campaign tables...
+2026-04-05 00:09:01,688 WARNING    fact_campaigns: no campaign report files found
+2026-04-05 00:09:01,688 INFO  
+[7/12] Building aggregation tables...
+2026-04-05 00:09:01,701 INFO    agg_platform_daily: 266
+2026-04-05 00:09:01,708 INFO    agg_restaurant_daily: 1,555
+2026-04-05 00:09:01,721 INFO    agg_funnel_conversion: 1,983
+2026-04-05 00:09:01,842 INFO    agg_customer_behavior: 3,942
+2026-04-05 00:09:01,842 INFO      {'One-time': 2037, 'Repeat': 1190, 'Loyal': 497, 'VIP': 218}
+2026-04-05 00:09:01,842 INFO  
+[8/12] Loading to MySQL...
+2026-04-05 00:09:01,915 INFO    dim_restaurants: 108 rows → MySQL [replace]
+2026-04-05 00:09:01,968 INFO    dim_customers: 3,943 rows → MySQL [replace]
+2026-04-05 00:09:02,557 INFO    fact_orders: 11,619 rows → MySQL [append]
+2026-04-05 00:09:02,786 INFO    fact_order_items: 26,329 rows → MySQL [append]
+2026-04-05 00:09:02,995 INFO    fact_order_geo: 11,619 rows → MySQL [append]
+2026-04-05 00:09:04,399 INFO    fact_funnel: 58,186 rows → MySQL [append]
+2026-04-05 00:09:07,772 INFO    fact_funnel_wa: 117,395 rows → MySQL [append]
+2026-04-05 00:09:07,772 INFO    fact_campaigns: skipped (empty)
+2026-04-05 00:09:07,799 INFO    agg_platform_daily: 266 rows → MySQL [replace]
+2026-04-05 00:09:07,851 INFO    agg_restaurant_daily: 1,555 rows → MySQL [replace]
+2026-04-05 00:09:07,903 INFO    agg_funnel_conversion: 1,983 rows → MySQL [replace]
+2026-04-05 00:09:07,989 INFO    agg_customer_behavior: 3,942 rows → MySQL [replace]
+2026-04-05 00:09:07,989 INFO    agg_campaign_performance: skipped (empty)
+2026-04-05 00:09:07,989 INFO  
+[9/12] Saving incremental checkpoints...
+2026-04-05 00:09:07,990 INFO    Checkpoint [app_funnel]: row 58185
+2026-04-05 00:09:07,990 INFO    Checkpoint [wa_funnel]: row 117394
+2026-04-05 00:09:07,990 INFO  
+[10/12] Archiving raw files...
+2026-04-05 00:09:07,990 INFO    Archived: data (14).csv
+2026-04-05 00:09:07,991 INFO    Archived: response_1775327057216.csv
+2026-04-05 00:09:07,991 INFO    Archived: funnelanalysisswayo_2026-04-04T20_07_35.851507587+05_30.csv
+2026-04-05 00:09:07,991 INFO    Archived: datewise_funnelanalysis_wa_2026-04-04T23_55_23.737858397+05_30.csv
+2026-04-05 00:09:07,992 INFO  
+[11/12] PIPELINE SUMMARY
+2026-04-05 00:09:07,992 INFO  ───────────────────────────────────────────────────────
+2026-04-05 00:09:07,992 INFO    dim_restaurants        :     108  (no lookup file)
+2026-04-05 00:09:07,992 INFO    dim_customers          :   3,943
+2026-04-05 00:09:07,992 INFO    fact_orders            :  11,619
+2026-04-05 00:09:07,992 INFO      gf_whatsapp          :   9,945
+2026-04-05 00:09:07,993 INFO      swayo_whatsapp       :     511
+2026-04-05 00:09:07,993 INFO      swayo_app            :   1,162
+2026-04-05 00:09:07,993 INFO    fact_order_items       :  26,329
+2026-04-05 00:09:07,993 INFO    fact_order_geo         :  11,619
+2026-04-05 00:09:07,993 INFO    fact_funnel (app)      :  58,186
+2026-04-05 00:09:07,993 INFO    fact_funnel_wa         : 117,395
+2026-04-05 00:09:07,993 INFO    fact_campaigns         :       0  ← NEW
+2026-04-05 00:09:07,993 INFO    agg_platform_daily     :     266
+2026-04-05 00:09:07,993 INFO    agg_restaurant_daily   :   1,555
+2026-04-05 00:09:07,993 INFO    agg_funnel_conversion  :   1,983
+2026-04-05 00:09:07,994 INFO    agg_customer_behavior  :   3,942
+2026-04-05 00:09:07,994 INFO    agg_campaign_performance:      0  ← NEW
+2026-04-05 00:09:07,994 INFO  
+  TOTAL TABLES: 13  |  ✅ PIPELINE v5.0 COMPLETED
+2026-04-05 00:09:07,994 INFO  =================================================================
+
+2026-04-05 04:19:36,966 INFO  
+=================================================================
+2026-04-05 04:19:36,966 INFO  PIPELINE v5.1 — START
+2026-04-05 04:19:36,966 INFO  =================================================================
+2026-04-05 04:19:36,966 INFO  
+[1/12] Loading files...
+2026-04-05 04:20:57,847 INFO  
+=================================================================
+2026-04-05 04:20:57,847 INFO  PIPELINE v5.1 — START
+2026-04-05 04:20:57,847 INFO  =================================================================
+2026-04-05 04:20:57,847 INFO  
+[1/12] Loading files...
+2026-04-05 04:22:46,956 INFO  
+=================================================================
+2026-04-05 04:22:46,956 INFO  PIPELINE v5.1 — START
+2026-04-05 04:22:46,956 INFO  =================================================================
+2026-04-05 04:22:46,956 INFO  
+[1/12] Loading files...
+2026-04-05 04:22:47,043 INFO    Loaded → data:26325 | response:0 | app_funnel:0 | wa_funnel:0 | campaign_files:1
+2026-04-05 04:22:47,043 INFO  
+[2/12] Building restaurant map from source files...
+2026-04-05 04:22:47,055 INFO    restaurant_map: 108 shops (from data.csv=108, new from response=0)
+2026-04-05 04:22:47,055 INFO  
+[3/12] Building dimension tables...
+2026-04-05 04:22:47,055 INFO    dim_restaurants: 108 rows
+2026-04-05 04:22:47,104 INFO    dim_customers: 3942 unique customers
+2026-04-05 04:22:47,104 INFO  
+[4/12] Building fact tables...
+2026-04-05 04:22:47,188 INFO    fact_orders: 11,618
+2026-04-05 04:22:47,189 INFO      gf_whatsapp:    9945
+2026-04-05 04:22:47,189 INFO      swayo_whatsapp: 511
+2026-04-05 04:22:47,190 INFO      swayo_app:      1162
+2026-04-05 04:22:47,205 INFO    fact_order_items: 26,325
+2026-04-05 04:22:47,302 INFO    fact_order_geo: 11,618 rows
+2026-04-05 04:22:47,303 INFO      with restaurant_pincode: 10332
+2026-04-05 04:22:47,303 INFO      with customer_pincode:   6332
+2026-04-05 04:22:47,303 INFO      with delivery_address:   10163
+2026-04-05 04:22:47,305 INFO  
+[5/12] Building funnel tables...
+2026-04-05 04:22:47,305 INFO  
+[6/12] Building campaign tables...
+2026-04-05 04:22:47,305 INFO    Loading campaign: 'swh30_shawarmahouse' ← cmp_swh30_shawarmahouse.xlsx
+2026-04-05 04:22:47,769 INFO    fact_campaigns: 133 rows from 1 file(s)
+2026-04-05 04:22:47,769 INFO      campaigns: ['swh30_shawarmahouse']
+2026-04-05 04:22:47,769 INFO      delivery_status: {'Failed': 48, 'Delivered': 46, 'Read': 35, 'Sent': 4}
+2026-04-05 04:22:47,775 INFO    agg_campaign_performance: 3 rows
+2026-04-05 04:22:47,776 INFO      [swh30_shawarmahouse] campaign_1775302420: recipients=1 sent=0 delivered=0 read=0 orders_after_24h=0 conversion=0.0%
+2026-04-05 04:22:47,776 INFO      [swh30_shawarmahouse] campaign_1775303349: recipients=3 sent=1 delivered=1 read=1 orders_after_24h=0 conversion=0.0%
+2026-04-05 04:22:47,776 INFO      [swh30_shawarmahouse] campaign_1775305094: recipients=129 sent=84 delivered=80 read=34 orders_after_24h=0 conversion=0.0%
+2026-04-05 04:22:47,776 INFO  
+[7/12] Building aggregation tables...
+2026-04-05 04:22:47,782 INFO    agg_platform_daily: 265
+2026-04-05 04:22:47,788 INFO    agg_restaurant_daily: 1,554
+2026-04-05 04:22:47,905 INFO    agg_customer_behavior: 3,942
+2026-04-05 04:22:47,906 INFO      {'One-time': 2037, 'Repeat': 1190, 'Loyal': 497, 'VIP': 218}
+2026-04-05 04:22:47,906 INFO  
+[8/12] Loading to MySQL...
+2026-04-05 04:22:48,469 INFO    dim_restaurants: 108 rows → MySQL [replace]
+2026-04-05 04:22:48,536 INFO    dim_customers: 3,942 rows → MySQL [replace]
+2026-04-05 04:22:49,173 INFO    fact_orders: 11,618 rows → MySQL [append]
+2026-04-05 04:22:49,438 INFO    fact_order_items: 26,325 rows → MySQL [append]
+2026-04-05 04:22:49,696 INFO    fact_order_geo: 11,618 rows → MySQL [append]
+2026-04-05 04:22:49,696 INFO    fact_funnel: skipped (empty)
+2026-04-05 04:22:49,696 INFO    fact_funnel_wa: skipped (empty)
+2026-04-05 04:22:49,713 INFO    fact_campaigns: 133 rows → MySQL [append]
+2026-04-05 04:22:49,732 INFO    agg_platform_daily: 265 rows → MySQL [replace]
+2026-04-05 04:22:49,776 INFO    agg_restaurant_daily: 1,554 rows → MySQL [replace]
+2026-04-05 04:22:49,776 INFO    agg_funnel_conversion: skipped (empty)
+2026-04-05 04:22:49,871 INFO    agg_customer_behavior: 3,942 rows → MySQL [replace]
+2026-04-05 04:22:49,878 INFO    agg_campaign_performance: 3 rows → MySQL [replace]
+2026-04-05 04:22:49,878 INFO  
+[9/12] Saving incremental checkpoints...
+2026-04-05 04:22:49,878 INFO  
+[10/12] Archiving raw files...
+2026-04-05 04:22:49,878 INFO    Archived: data (14).csv
+2026-04-05 04:22:49,879 INFO    Archived: cmp_swh30_shawarmahouse.xlsx
+2026-04-05 04:22:49,879 INFO  
+[11/12] PIPELINE SUMMARY
+2026-04-05 04:22:49,879 INFO  ───────────────────────────────────────────────────────
+2026-04-05 04:22:49,879 INFO    dim_restaurants        :     108  (no lookup file)
+2026-04-05 04:22:49,879 INFO    dim_customers          :   3,942
+2026-04-05 04:22:49,879 INFO    fact_orders            :  11,618
+2026-04-05 04:22:49,879 INFO      gf_whatsapp          :   9,945
+2026-04-05 04:22:49,880 INFO      swayo_whatsapp       :     511
+2026-04-05 04:22:49,880 INFO      swayo_app            :   1,162
+2026-04-05 04:22:49,880 INFO    fact_order_items       :  26,325
+2026-04-05 04:22:49,880 INFO    fact_order_geo         :  11,618
+2026-04-05 04:22:49,880 INFO    fact_funnel (app)      :       0
+2026-04-05 04:22:49,880 INFO    fact_funnel_wa         :       0
+2026-04-05 04:22:49,880 INFO    fact_campaigns         :     133  ← .xlsx
+2026-04-05 04:22:49,880 INFO    agg_platform_daily     :     265
+2026-04-05 04:22:49,880 INFO    agg_restaurant_daily   :   1,554
+2026-04-05 04:22:49,880 INFO    agg_funnel_conversion  :       0
+2026-04-05 04:22:49,880 INFO    agg_customer_behavior  :   3,942
+2026-04-05 04:22:49,880 INFO    agg_campaign_performance:      3  ← NEW
+2026-04-05 04:22:49,880 INFO  
+  TOTAL TABLES: 13  |  ✅ PIPELINE v5.1 COMPLETED
+2026-04-05 04:22:49,880 INFO  =================================================================
+
+2026-04-05 04:24:24,656 INFO  
+=================================================================
+2026-04-05 04:24:24,657 INFO  PIPELINE v5.1 — START
+2026-04-05 04:24:24,657 INFO  =================================================================
+2026-04-05 04:24:24,657 INFO  
+[1/12] Loading files...
+2026-04-05 04:24:24,657 WARNING  No data*.csv found — pipeline exiting.
