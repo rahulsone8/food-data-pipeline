@@ -1,4 +1,8 @@
-project/data/
-project/logs/
+project/data
+project/logs
+project/Dashboard
+project/scripts
+project/config
+project/rough
 .env
 .DS_Store

@@ -30,6 +30,10 @@ import glob, logging, os, re, shutil
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
@@ -48,7 +52,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s  %(message)s",
 )
 
-DB_URL = "mysql+pymysql://root:Rahul1975@localhost/funnel_pipeline"
+DB_URL = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
 engine = create_engine(DB_URL)
 
 # ── Platform prefix map (GFFW not GF — important!) ───────────────────────────
