@@ -1,8 +1,13 @@
-project/data/
-project/logs/
-project/Dashboard/
-project/scripts/
-project/config/
-project/rough/
+# Folders (relative to this .gitignore location)
+data/
+logs/
+Dashboard/
+scripts/
+config/
+rough/
+
+# Sensitive files
 .env
+
+# System files
 .DS_Store
