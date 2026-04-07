@@ -10,5 +10,5 @@ rough/
 
 # System files
 .DS_Store
-project/PIPELINE_FLOW_DOCUMENTATION.md
-project/pipeline_main_updates.py
+PIPELINE_FLOW_DOCUMENTATION.md
+pipeline_main_updates.py
