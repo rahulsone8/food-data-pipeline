@@ -2,7 +2,6 @@
 data/
 logs/
 Dashboard/
-scripts/
 config/
 rough/
 
@@ -11,3 +10,5 @@ rough/
 
 # System files
 .DS_Store
+project/PIPELINE_FLOW_DOCUMENTATION.md
+project/pipeline_main_updates.py
