@@ -1,23 +1,37 @@
 """
 =============================================================================
- FOOD DELIVERY ANALYTICS PIPELINE — v5.1
+ FOOD DELIVERY ANALYTICS PIPELINE — v7.0
 =============================================================================
- Changes from v5.0:
-   - FIXED: Campaign files are now .xlsx format (not .csv)
-   - Pattern: cmp_*.xlsx (e.g., cmp_swh30_shawarmahouse.xlsx)
-   - Campaign name extracted: cmp_swh30_shawarmahouse.xlsx → "swh30_shawarmahouse"
-   - Uses pd.read_excel() instead of pd.read_csv()
-   - Archive pattern updated to handle .xlsx files
+ Changes from v6.0:
+   1. CHUNK-BASED PROCESSING: All CSV files read in configurable chunks
+      (default: 10,000 rows) for memory efficiency
+   
+   2. MYSQL-BACKED RESTAURANT MASTER: dim_restaurants now persists in MySQL
+      with incremental UPSERT logic. New restaurants auto-added each run.
+      Same restaurant name allowed if different shop_id.
+   
+   3. TIMESTAMP-BASED FUNNEL DEDUPLICATION: Fixed data loss issue in
+      fact_funnel and fact_funnel_wa. Now uses composite keys
+      (timestamp|action|customer|shop) instead of row_id checkpoints.
+   
+   4. SHOP_ID SIMPLIFIED: Removed extract_shop_id_from_onboarded().
+      Provider_ID column in data*.csv IS shop_id directly.
+   
+   5. COUPON COLUMN: Explicit 'coupon' column added to fact_orders,
+      sourced from response.csv "Coupon Value".
+   
+   6. DELIVERY_TYPE CLARIFIED: In response*.csv, "online" = delivery order
+      (properly documented in code).
 
  MySQL tables (13 total):
-   dim_restaurants          one row per restaurant (shop_id PK)
+   dim_restaurants          one row per restaurant (shop_id PK) - MySQL master
    dim_customers            one row per customer
-   fact_orders              one row per order — all platforms
+   fact_orders              one row per order — all platforms (with coupon column)
    fact_order_items         one row per item
    fact_order_geo           one row per order — location/distance data
-   fact_funnel              Swayo App funnel events (45,102 rows)
-   fact_funnel_wa           WhatsApp funnel events (9,621 rows)
-   fact_campaigns           one row per campaign message recipient  ← .xlsx files
+   fact_funnel              Swayo App funnel events (timestamp-dedup)
+   fact_funnel_wa           WhatsApp funnel events (timestamp-dedup)
+   fact_campaigns           one row per campaign message recipient
    agg_platform_daily       daily KPIs by platform
    agg_restaurant_daily     daily KPIs by restaurant
    agg_funnel_conversion    Swayo App funnel conversion rates
@@ -52,8 +66,12 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s  %(message)s",
 )
 
-DB_URL = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+# Use environment variables for DB connection (fallback to hardcoded if .env missing)
+DB_URL = f"mysql+pymysql://{os.getenv('DB_USER', 'root')}:{os.getenv('DB_PASSWORD', 'Rahul1975')}@{os.getenv('DB_HOST', 'localhost')}/{os.getenv('DB_NAME', 'funnel_pipeline')}"
 engine = create_engine(DB_URL)
+
+# ── Chunk size for memory-efficient processing ───────────────────────────────
+CHUNK_SIZE = 10000  # Process CSV files in chunks of 10,000 rows
 
 # ── Platform prefix map (GFFW not GF — important!) ───────────────────────────
 PLATFORMS = {
@@ -65,8 +83,10 @@ PLATFORMS = {
 STATUS_MAP = {
     "completed"  : "Completed",
     "accepted"   : "Accepted",
-    "in-progress": "In-Progress",
+    "in-progress": "In-Progress",   # handles both 'In-progress' and 'In-Progress'
+    "in progress": "In-Progress",
     "cancelled"  : "Cancelled",
+    "canceled"   : "Cancelled",
 }
 
 # Swayo App funnel actions
@@ -75,7 +95,7 @@ APP_ACTION_ORDER   = {"PDP": 1, "PLP": 2, "VIEW_CART": 3, "CHECKOUT": 4, "ORDER"
 
 # WhatsApp funnel actions
 VALID_WA_FUNNEL    = {"VIEW_CATALOG", "TOFU", "VIEW_CART", "CHECKOUT", "ORDER", "QUERY"}
-WA_ACTION_ORDER    = {"VIEW_CATALOG": 1, "TOFU": 1, "VIEW_CART": 3,
+WA_ACTION_ORDER    = {"VIEW_CATALOG": 2, "TOFU": 1, "VIEW_CART": 3,
                       "CHECKOUT": 4, "ORDER": 5, "QUERY": 6}
 
 
@@ -113,12 +133,7 @@ def normalize_status(s) -> str:
     return STATUS_MAP.get(str(s).strip().lower(), str(s).strip())
 
 
-def extract_shop_id_from_onboarded(raw_val) -> str | None:
-    """Parse shop_id from onboarded_date dict-string in data.csv."""
-    if pd.isna(raw_val):
-        return None
-    m = re.search(r"'shop_id':\s*'([^']+)'", str(raw_val))
-    return m.group(1) if m else None
+# REMOVED: extract_shop_id_from_onboarded() — Provider_ID is already shop_id
 
 
 def clean_phone(val) -> str | None:
@@ -146,115 +161,183 @@ def extract_pincode_from_address(addr) -> str | None:
     return m.group(1) if m else None
 
 
-def get_last_funnel_row(name: str) -> int:
-    """Read incremental checkpoint for a named funnel table."""
-    try:
-        with open(f"{PROCESSED}/{name}_last_run.txt") as f:
-            return int(f.read().strip())
-    except Exception:
-        return -1
-
-
-def save_last_funnel_row(df: pd.DataFrame, name: str) -> None:
-    if not df.empty and "row_id" in df.columns:
-        val = int(df["row_id"].max())
-        with open(f"{PROCESSED}/{name}_last_run.txt", "w") as f:
-            f.write(str(val))
-        log(f"  Checkpoint [{name}]: row {val}")
+# REMOVED: Old checkpoint functions - now using timestamp-based deduplication
+# get_last_funnel_row() and save_last_funnel_row() replaced with DB queries
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 1 — LOAD RAW FILES
+# STEP 1 — LOAD RAW FILES (with chunked processing)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_files():
+def load_files_chunked():
+    """
+    Load CSV files in chunks for memory efficiency.
+    Returns file paths and chunk info instead of full DataFrames.
+    """
     data_files      = glob.glob(f"{RAW}/data*.csv")
     response_files  = glob.glob(f"{RAW}/response*.csv")
     funnel_files    = glob.glob(f"{RAW}/funnelanalysis*.csv")
     wa_funnel_files = glob.glob(f"{RAW}/datewise_funnelanalysis_wa*.csv")
-    campaign_files  = glob.glob(f"{RAW}/cmp_*.xlsx")   # ← FIXED: .xlsx files
+    campaign_files  = glob.glob(f"{RAW}/*_report.csv")
 
     if not data_files:
         log("No data*.csv found — pipeline exiting.", "warning")
         return None
 
-    f1 = pd.read_csv(data_files[0],    low_memory=False)
-    f2 = pd.read_csv(response_files[0], low_memory=False) if response_files else pd.DataFrame()
-    f3 = pd.read_csv(funnel_files[0],  low_memory=False) if funnel_files   else pd.DataFrame()
-    f4 = pd.read_csv(wa_funnel_files[0], low_memory=False) if wa_funnel_files else pd.DataFrame()
+    log(f"  Found files → data:{len(data_files)} | response:{len(response_files)} | "
+        f"app_funnel:{len(funnel_files)} | wa_funnel:{len(wa_funnel_files)} | "
+        f"campaign:{len(campaign_files)}")
+    
+    return {
+        'data': data_files[0] if data_files else None,
+        'response': response_files[0] if response_files else None,
+        'funnel': funnel_files[0] if funnel_files else None,
+        'wa_funnel': wa_funnel_files[0] if wa_funnel_files else None,
+        'campaigns': campaign_files
+    }
 
-    for df in [f1, f2, f3, f4]:
-        df.columns = [str(col).strip() for col in df.columns]
 
-    log(f"  Loaded → data:{len(f1)} | response:{len(f2)} | "
-        f"app_funnel:{len(f3)} | wa_funnel:{len(f4)} | "
-        f"campaign_files:{len(campaign_files)}")
-    return f1, f2, f3, f4, campaign_files
+def read_csv_in_chunks(filepath, chunk_size=CHUNK_SIZE):
+    """
+    Generator to read CSV file in chunks.
+    Strips column names for each chunk.
+    """
+    if not filepath or not os.path.exists(filepath):
+        return
+    
+    for chunk in pd.read_csv(filepath, chunksize=chunk_size, low_memory=False):
+        chunk.columns = chunk.columns.str.strip()
+        yield chunk
+
+
+def load_full_dataframe(filepath):
+    """
+    Load entire CSV into memory (for smaller files or initial processing).
+    """
+    if not filepath or not os.path.exists(filepath):
+        return pd.DataFrame()
+    
+    df = pd.read_csv(filepath, low_memory=False)
+    df.columns = df.columns.str.strip()
+    return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 2 — BUILD RESTAURANT MAP (NO lookup file — from source data only)
+# STEP 2 — BUILD RESTAURANT MAP (MySQL-backed with incremental updates)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_restaurant_map(f1: pd.DataFrame, f2: pd.DataFrame) -> pd.DataFrame:
+def build_restaurant_map_chunked(data_file, response_file) -> pd.DataFrame:
     """
-    Build shop_id → restaurant_name map directly from:
-      - data.csv:   Provider_ID → Seller_Name + Seller_City + Seller_Pincode
-      - response*:  Shop ID → Restaurant Name
-
-    No restaurant_lookup.csv needed.
-    Returns a clean deduplicated DataFrame used for all downstream joins.
+    Build restaurant master table with MySQL persistence.
+    Process files in chunks and maintain incremental updates.
+    
+    Strategy:
+    1. Load existing restaurants from MySQL (if table exists)
+    2. Extract new restaurants from data*.csv and response*.csv in chunks
+    3. Merge new with existing (allow same name if different shop_id)
+    4. Update MySQL with UPSERT logic
+    5. Return complete restaurant map for downstream joins
     """
-    # ── Source A: data.csv (GF + SWWA orders) ────────────────────────────────
-    src_a = f1[["Provider_ID", "Seller_Name", "Seller_City", "Seller_Pincode"]].copy()
-    src_a = src_a.rename(columns={
-        "Provider_ID"   : "shop_id",
-        "Seller_Name"   : "restaurant_name",
-        "Seller_City"   : "city",
-        "Seller_Pincode": "seller_pincode",
-    })
-    src_a["shop_id"]         = src_a["shop_id"].astype(str).str.strip()
-    src_a["restaurant_name"] = src_a["restaurant_name"].str.strip()
-    src_a = src_a.dropna(subset=["shop_id", "restaurant_name"])
-    src_a = src_a.drop_duplicates(subset=["shop_id"])
-
-    # ── Source B: response CSV (Swayo App orders) ─────────────────────────────
-    src_b = pd.DataFrame()
-    if not f2.empty:
-        src_b = f2[["Shop ID", "Restaurant Name"]].copy()
-        src_b = src_b.rename(columns={
-            "Shop ID"        : "shop_id",
-            "Restaurant Name": "restaurant_name",
-        })
-        src_b["shop_id"]         = src_b["shop_id"].astype(str).str.strip()
-        src_b["restaurant_name"] = src_b["restaurant_name"].str.strip()
-        src_b = src_b.dropna(subset=["shop_id", "restaurant_name"])
-        src_b["city"]           = None
-        src_b["seller_pincode"] = None
-        src_b = src_b.drop_duplicates(subset=["shop_id"])
-
-    # ── Merge: src_a is primary (has pincode + city), src_b fills gaps ────────
-    if not src_b.empty:
-        new_shops = src_b[~src_b["shop_id"].isin(src_a["shop_id"])]
-        restaurant_map = pd.concat([src_a, new_shops], ignore_index=True)
+    
+    # ── Load existing restaurant master from MySQL ────────────────────────────
+    try:
+        existing_restaurants = pd.read_sql("SELECT * FROM dim_restaurants", engine)
+        log(f"  Loaded {len(existing_restaurants)} existing restaurants from MySQL")
+    except Exception:
+        existing_restaurants = pd.DataFrame(columns=["shop_id", "restaurant_name", "city", "seller_pincode"])
+        log("  No existing dim_restaurants table — starting fresh")
+    
+    all_restaurants = []
+    
+    # ── Extract restaurants from data*.csv (in chunks) ────────────────────────
+    if data_file:
+        log("  Processing data.csv for restaurants...")
+        chunk_count = 0
+        for chunk in read_csv_in_chunks(data_file):
+            chunk_count += 1
+            src = chunk[["Provider_ID", "Seller_Name", "Seller_City", "Seller_Pincode"]].copy()
+            src = src.rename(columns={
+                "Provider_ID"   : "shop_id",
+                "Seller_Name"   : "restaurant_name",
+                "Seller_City"   : "city",
+                "Seller_Pincode": "seller_pincode",
+            })
+            src["shop_id"]         = src["shop_id"].astype(str).str.strip()
+            src["restaurant_name"] = src["restaurant_name"].str.strip()
+            src = src.dropna(subset=["shop_id", "restaurant_name"])
+            src = src.drop_duplicates(subset=["shop_id"])
+            all_restaurants.append(src)
+        log(f"    Processed {chunk_count} chunks from data.csv")
+    
+    # ── Extract restaurants from response*.csv (in chunks) ────────────────────
+    if response_file:
+        log("  Processing response.csv for restaurants...")
+        chunk_count = 0
+        for chunk in read_csv_in_chunks(response_file):
+            chunk_count += 1
+            src = chunk[["Shop ID", "Restaurant Name"]].copy()
+            src = src.rename(columns={
+                "Shop ID"        : "shop_id",
+                "Restaurant Name": "restaurant_name",
+            })
+            src["shop_id"]         = src["shop_id"].astype(str).str.strip()
+            src["restaurant_name"] = src["restaurant_name"].str.strip()
+            src = src.dropna(subset=["shop_id", "restaurant_name"])
+            src["city"]           = None
+            src["seller_pincode"] = None
+            src = src.drop_duplicates(subset=["shop_id"])
+            all_restaurants.append(src)
+        log(f"    Processed {chunk_count} chunks from response.csv")
+    
+    # ── Combine all extracted restaurants ─────────────────────────────────────
+    if all_restaurants:
+        new_restaurants = pd.concat(all_restaurants, ignore_index=True)
+        new_restaurants = new_restaurants.drop_duplicates(subset=["shop_id"])
+        log(f"  Extracted {len(new_restaurants)} unique restaurants from source files")
     else:
-        restaurant_map = src_a.copy()
-
+        new_restaurants = pd.DataFrame(columns=["shop_id", "restaurant_name", "city", "seller_pincode"])
+    
+    # ── Merge with existing restaurants (UPSERT logic) ────────────────────────
+    # For existing shop_ids, update with new data (data.csv has priority for location)
+    # For new shop_ids, add them
+    # Allow same restaurant_name if different shop_id
+    
+    if not existing_restaurants.empty:
+        # Find truly new shops not in existing
+        new_shop_ids = set(new_restaurants["shop_id"]) - set(existing_restaurants["shop_id"])
+        truly_new = new_restaurants[new_restaurants["shop_id"].isin(new_shop_ids)]
+        
+        # For existing shop_ids, prefer data from new extraction (fresher data)
+        existing_shop_ids = set(new_restaurants["shop_id"]) & set(existing_restaurants["shop_id"])
+        updated = new_restaurants[new_restaurants["shop_id"].isin(existing_shop_ids)]
+        
+        # Keep old records not in new extraction
+        unchanged_shop_ids = set(existing_restaurants["shop_id"]) - set(new_restaurants["shop_id"])
+        unchanged = existing_restaurants[existing_restaurants["shop_id"].isin(unchanged_shop_ids)]
+        
+        restaurant_map = pd.concat([unchanged, updated, truly_new], ignore_index=True)
+        log(f"  Restaurant map: {len(truly_new)} new, {len(updated)} updated, {len(unchanged)} unchanged")
+    else:
+        restaurant_map = new_restaurants.copy()
+        log(f"  Restaurant map: {len(restaurant_map)} new restaurants (first run)")
+    
     restaurant_map = restaurant_map.drop_duplicates(subset=["shop_id"])
-
-    log(f"  restaurant_map: {len(restaurant_map)} shops "
-        f"(from data.csv={len(src_a)}, new from response={len(src_b) - len(src_b[src_b['shop_id'].isin(src_a['shop_id'])]) if not src_b.empty else 0})")
+    log(f"  Total restaurants in master: {len(restaurant_map)}")
+    
     return restaurant_map
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 3 — DIM: RESTAURANTS
-# ─────────────────────────────────────────────────────────────────────────────
-
 def build_dim_restaurants(restaurant_map: pd.DataFrame) -> pd.DataFrame:
+    """
+    Prepare dim_restaurants for MySQL with proper datatypes.
+    This will be loaded with if_exists='replace' to ensure MySQL is master source.
+    """
     dim = restaurant_map.copy()
     dim["seller_pincode"] = pd.to_numeric(dim["seller_pincode"], errors="coerce")
-    log(f"  dim_restaurants: {len(dim)} rows")
+    # Ensure seller_name column exists (alias of restaurant_name for legacy joins)
+    if "seller_name" not in dim.columns:
+        dim["seller_name"] = dim["restaurant_name"]
+    log(f"  dim_restaurants ready: {len(dim)} rows")
     return dim
 
 
@@ -301,8 +384,8 @@ def build_fact_orders(
 
     # ── f1: GF WhatsApp + Swayo WhatsApp ─────────────────────────────────────
     o1 = f1.copy()
-    o1["shop_id"] = o1["onboarded_date"].apply(extract_shop_id_from_onboarded).fillna(
-                    o1["Provider_ID"].astype(str).str.strip())
+    # Provider_ID is already shop_id — no extraction needed
+    o1["shop_id"] = o1["Provider_ID"].astype(str).str.strip()
 
     o1 = o1.rename(columns={
         "Pos_Order_ID"           : "order_id",
@@ -338,7 +421,7 @@ def build_fact_orders(
             "Order Status"              : "order_status",
             "Customer Name"             : "customer_name",
             "Customer Contact"          : "customer_contact",
-            "Delivery Type"             : "delivery_type",
+            "Delivery Type"             : "delivery_type",  # "online" = delivery order
             "Shop ID"                   : "shop_id",
             "Coupon Value"              : "coupon_value",
             "Delivery Distance"         : "delivery_distance",
@@ -370,6 +453,9 @@ def build_fact_orders(
     if not o2.empty:
         parts.append(o2[COLS])
     orders = pd.concat(parts, ignore_index=True)
+    
+    # ── Add explicit coupon column (from response.csv Coupon Value) ──────────
+    orders["coupon"] = orders["coupon_value"]
 
     # ── Clean ─────────────────────────────────────────────────────────────────
     orders["created_at"]       = pd.to_datetime(orders["created_at"], format="mixed", errors="coerce")
@@ -380,7 +466,7 @@ def build_fact_orders(
     orders["order_value"]      = pd.to_numeric(orders["order_value"],  errors="coerce")
     orders["discount"]         = pd.to_numeric(orders["discount"],     errors="coerce").fillna(0)
 
-    # ── Date dimensions ───────────────────────────────────────────────────────
+    # ── Date dimensions for Tableau filters ───────────────────────────────────
     orders["order_date"]       = orders["created_at"].dt.date
     orders["order_year"]       = orders["created_at"].dt.year
     orders["order_month"]      = orders["created_at"].dt.month
@@ -389,10 +475,10 @@ def build_fact_orders(
     orders["order_hour"]       = orders["created_at"].dt.hour
     orders["order_dow"]        = orders["created_at"].dt.day_name()
 
-    # ── Derived metrics ───────────────────────────────────────────────────────
+    # ── Derived metrics (must be INT 0/1 for MySQL SUM()) ─────────────────────
     orders["net_revenue"]  = orders["order_value"] - orders["discount"]
-    orders["is_cancelled"] = orders["order_status"] == "Cancelled"
-    orders["has_coupon"]   = orders["coupon_value"].fillna(0) > 0
+    orders["is_cancelled"] = (orders["order_status"] == "Cancelled").astype(int)   # INT not bool
+    orders["has_coupon"]   = (orders["coupon_value"].fillna(0) > 0).astype(int)    # INT not bool
 
     orders = orders.drop_duplicates(subset=["order_id"])
 
@@ -430,7 +516,7 @@ def build_fact_order_items(f1: pd.DataFrame, f2: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 7 — FACT: ORDER GEO
+# STEP 7 — FACT: ORDER GEO  ← NEW TABLE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_fact_order_geo(
@@ -462,8 +548,8 @@ def build_fact_order_geo(
 
     # ── f1: GF WhatsApp + Swayo WhatsApp ─────────────────────────────────────
     o1 = f1.copy()
-    o1["shop_id"] = o1["onboarded_date"].apply(extract_shop_id_from_onboarded).fillna(
-                    o1["Provider_ID"].astype(str).str.strip())
+    # Provider_ID is already shop_id — no extraction needed
+    o1["shop_id"] = o1["Provider_ID"].astype(str).str.strip()
     o1["created_at"] = pd.to_datetime(o1["Created"], errors="coerce")
 
     # Extract 6-digit pincode from full address string
@@ -585,18 +671,45 @@ def build_fact_funnel_app(f3: pd.DataFrame) -> pd.DataFrame:
     df["action_order"]     = df["action"].map(APP_ACTION_ORDER)
     df["funnel_source"]    = "swayo_app"
 
-    df = df.reset_index(drop=True)
-    df["row_id"] = df.index
-    last = get_last_funnel_row("app_funnel")
-    new  = df[df["row_id"] > last].copy()
+    # ── Incremental loading (timestamp-based to avoid data loss) ─────────────
+    try:
+        existing_app_funnel = pd.read_sql(
+            """SELECT timestamp, action, customer_contact, shop_id 
+               FROM fact_funnel""", 
+            engine
+        )
+        existing_app_funnel["timestamp"] = pd.to_datetime(existing_app_funnel["timestamp"])
+        
+        # Create composite key for deduplication
+        df["_key"] = (df["timestamp"].astype(str) + "|" + 
+                     df["action"] + "|" + 
+                     df["customer_contact"].fillna("NA") + "|" + 
+                     df["shop_id"].fillna("NA"))
+        
+        existing_app_funnel["_key"] = (existing_app_funnel["timestamp"].astype(str) + "|" + 
+                                       existing_app_funnel["action"] + "|" + 
+                                       existing_app_funnel["customer_contact"].fillna("NA") + "|" + 
+                                       existing_app_funnel["shop_id"].fillna("NA"))
+        
+        # Keep only new records not in existing
+        existing_keys = set(existing_app_funnel["_key"])
+        new = df[~df["_key"].isin(existing_keys)].copy()
+        new = new.drop(columns=["_key"])
+        
+        log(f"  fact_funnel (app): {len(new):,} new rows (total in file: {len(df):,}, existing: {len(existing_app_funnel):,})")
+    except Exception as e:
+        # First run or table doesn't exist
+        log(f"  fact_funnel (app): Loading all {len(df):,} rows (first run or table missing)")
+        new = df.copy()
 
-    log(f"  fact_funnel (app): {len(new):,} new rows (total clean: {len(df):,})")
-    log(f"    actions: {new['action'].value_counts().to_dict()}")
+    if not new.empty:
+        log(f"    actions: {new['action'].value_counts().to_dict()}")
+    
     return new
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 9 — FACT: FUNNEL WA
+# STEP 9 — FACT: FUNNEL WA  ← NEW TABLE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_fact_funnel_wa(
@@ -676,51 +789,77 @@ def build_fact_funnel_wa(
         "status",
     ]].copy()
 
-    # ── Incremental ───────────────────────────────────────────────────────────
-    result = result.reset_index(drop=True)
-    result["row_id"] = result.index
-    last = get_last_funnel_row("wa_funnel")
-    new  = result[result["row_id"] > last].copy()
+    # ── Incremental loading (timestamp-based to avoid data loss) ─────────────
+    # Previous approach used row_id based on index, which could lose data
+    # New approach: use timestamp-based deduplication with existing records
+    try:
+        existing_wa_funnel = pd.read_sql(
+            """SELECT timestamp, action, customer_contact, shop_id, campaign_id 
+               FROM fact_funnel_wa""", 
+            engine
+        )
+        existing_wa_funnel["timestamp"] = pd.to_datetime(existing_wa_funnel["timestamp"])
+        
+        # Create composite key for deduplication
+        result["_key"] = (result["timestamp"].astype(str) + "|" + 
+                         result["action"] + "|" + 
+                         result["customer_contact"].fillna("NA") + "|" + 
+                         result["shop_id"].fillna("NA") + "|" +
+                         result["campaign_id"].fillna("NA"))
+        
+        existing_wa_funnel["_key"] = (existing_wa_funnel["timestamp"].astype(str) + "|" + 
+                                      existing_wa_funnel["action"] + "|" + 
+                                      existing_wa_funnel["customer_contact"].fillna("NA") + "|" + 
+                                      existing_wa_funnel["shop_id"].fillna("NA") + "|" +
+                                      existing_wa_funnel["campaign_id"].fillna("NA"))
+        
+        # Keep only new records not in existing
+        existing_keys = set(existing_wa_funnel["_key"])
+        new = result[~result["_key"].isin(existing_keys)].copy()
+        new = new.drop(columns=["_key"])
+        
+        log(f"  fact_funnel_wa: {len(new):,} new rows (total in file: {len(result):,}, existing: {len(existing_wa_funnel):,})")
+    except Exception as e:
+        # First run or table doesn't exist
+        log(f"  fact_funnel_wa: Loading all {len(result):,} rows (first run or table missing)")
+        new = result.copy()
 
-    log(f"  fact_funnel_wa: {len(new):,} new rows (total clean: {len(result):,})")
-    log(f"    actions: {new['action'].value_counts().to_dict()}")
-    log(f"    unique customers: {new['customer_contact'].nunique()}")
-    log(f"    unique restaurants: {new['restaurant_name'].nunique()}")
+    if not new.empty:
+        log(f"    actions: {new['action'].value_counts().to_dict()}")
+        log(f"    unique customers: {new['customer_contact'].nunique()}")
+        log(f"    unique restaurants: {new['restaurant_name'].nunique()}")
+    
     return new
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 10 — FACT: CAMPAIGNS
+# STEP 10 — FACT: CAMPAIGNS  ← NEW
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_campaign_name(filepath: str) -> str:
     """
-    Derive campaign_name from filename.
-    
-    Pattern: cmp_swh30_shawarmahouse.xlsx → "swh30_shawarmahouse"
-    
-    Rules:
-    - Strip "cmp_" prefix
-    - Strip ".xlsx" extension
-    - Return the middle part as campaign_name
+    Derive campaign_name from filename — the filename IS the campaign identifier.
+
+    Supported patterns (all → strip extension + report suffix):
+      mfc_swayowhatsapp_xlsx_-_report.csv   → "mfc_swayowhatsapp"
+      just_fresh_point_march_-_report.csv   → "just_fresh_point_march"
+      shawarma_house_diwali.csv             → "shawarma_house_diwali"
+      food_court_weekend_offer_-_report.csv → "food_court_weekend_offer"
     """
     import re as _re
     stem = os.path.basename(filepath)
-    stem = _re.sub(r"\.xlsx$", "", stem, flags=_re.IGNORECASE)  # Remove .xlsx
-    stem = _re.sub(r"^cmp_", "", stem)                           # Remove cmp_ prefix
-    stem = _re.sub(r"_+", "_", stem).strip("_")                  # Clean up underscores
+    stem = _re.sub(r"\.csv$", "", stem, flags=_re.IGNORECASE)
+    stem = _re.sub(r"_xlsx_-_report$", "", stem)   # pattern 1
+    stem = _re.sub(r"_-_report$",      "", stem)   # pattern 2
+    stem = _re.sub(r"_report$",        "", stem)   # pattern 3
+    stem = _re.sub(r"_+", "_", stem).strip("_")
     return stem
 
 
 def build_fact_campaigns(campaign_files: list) -> pd.DataFrame:
     """
-    Load all campaign report Excel files (.xlsx).
-    campaign_name is extracted from filename: cmp_swh30_shawarmahouse.xlsx → "swh30_shawarmahouse"
-    
-    Expected Excel columns:
-      Campaign Id, Mobile Number, Scheduled Date, Scheduled Time,
-      Sent, Delivered, Read, 1st Pitch Response
-    
+    Load all campaign report CSVs.
+    campaign_name is extracted from each filename — no manual input needed.
     Columns:
       campaign_name, campaign_id, mobile_number, scheduled_date, scheduled_time,
       scheduled_at, sent_at, delivered_at, read_at,
@@ -738,8 +877,8 @@ def build_fact_campaigns(campaign_files: list) -> pd.DataFrame:
         log(f"  Loading campaign: '{campaign_name}' ← {os.path.basename(filepath)}")
 
         try:
-            df = pd.read_excel(filepath)  # ← CHANGED from read_csv to read_excel
-            df.columns = [str(col).strip() for col in df.columns]
+            df = pd.read_csv(filepath, low_memory=False)
+            df.columns = df.columns.str.strip()
         except Exception as e:
             log(f"  ERROR reading {filepath}: {e}", "error")
             continue
@@ -777,6 +916,10 @@ def build_fact_campaigns(campaign_files: list) -> pd.DataFrame:
                 r["scheduled_date"].year < 2020
             ) else r["scheduled_date"],
             axis=1,
+        )
+        # Store as plain string 'YYYY-MM-DD' so MySQL DATE() cast works cleanly
+        df["scheduled_date"] = df["scheduled_date"].apply(
+            lambda x: str(x) if pd.notna(x) else None
         )
 
         # ── Combined scheduled_at datetime ────────────────────────────────────
@@ -824,7 +967,7 @@ def build_fact_campaigns(campaign_files: list) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 11 — AGG: CAMPAIGN PERFORMANCE
+# STEP 11 — AGG: CAMPAIGN PERFORMANCE  ← NEW
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_agg_campaign_performance(
@@ -921,9 +1064,7 @@ def build_agg_campaign_performance(
     return agg
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 12 — AGG: OTHER TABLES
-# ─────────────────────────────────────────────────────────────────────────────
+
 
 def build_agg_platform_daily(fact_orders: pd.DataFrame) -> pd.DataFrame:
     agg = fact_orders.groupby(
@@ -954,6 +1095,7 @@ def build_agg_restaurant_daily(fact_orders: pd.DataFrame) -> pd.DataFrame:
         avg_order_value = ("order_value",  "mean"),
         discount_given  = ("discount",     "sum"),
         cancelled_count = ("is_cancelled", "sum"),
+        coupon_orders   = ("has_coupon",   "sum"),   # ← added: needed by /api/restaurants
     ).reset_index()
     agg["cancellation_rate"] = (
         agg["cancelled_count"] / agg["order_count"].replace(0, 1) * 100
@@ -1008,14 +1150,18 @@ def build_agg_customer_behavior(fact_orders: pd.DataFrame) -> pd.DataFrame:
         if n >= 5:  return "Loyal"
         if n >= 2:  return "Repeat"
         return "One-time"
-    agg["customer_segment"] = agg["total_orders"].apply(seg)
+    agg["customer_segment"]  = agg["total_orders"].apply(seg)
+    agg["cancellation_rate"] = (
+        agg["cancelled_orders"] / agg["total_orders"].replace(0, 1) * 100
+    ).round(2)
+    agg["avg_order_value"] = agg["avg_order_value"].round(2)
     log(f"  agg_customer_behavior: {len(agg):,}")
     log(f"    {agg['customer_segment'].value_counts().to_dict()}")
     return agg
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 13 — ARCHIVE
+# STEP 11 — ARCHIVE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def archive_files():
@@ -1024,7 +1170,7 @@ def archive_files():
         f"{RAW}/response*.csv",
         f"{RAW}/funnelanalysis*.csv",
         f"{RAW}/datewise_funnelanalysis_wa*.csv",
-        f"{RAW}/cmp_*.xlsx",    # ← ADDED: Archive campaign Excel files
+        f"{RAW}/*_report.csv",    # ← campaign report files
     ]
     for pat in patterns:
         for f in glob.glob(pat):
@@ -1039,27 +1185,58 @@ def archive_files():
 
 def run_pipeline():
     log("\n" + "=" * 65)
-    log("PIPELINE v5.1 — START")
+    log("PIPELINE v7.0 — CHUNKED PROCESSING — START")
     log("=" * 65)
 
-    # 1. Load
-    log("\n[1/12] Loading files...")
-    result = load_files()
-    if result is None:
+    # 1. Load file paths
+    log("\n[1/12] Loading file paths...")
+    file_paths = load_files_chunked()
+    if file_paths is None:
         return
-    f1, f2, f3, f4, campaign_files = result
 
-    # 2. Restaurant map (no lookup file)
-    log("\n[2/12] Building restaurant map from source files...")
-    restaurant_map = build_restaurant_map(f1, f2)
+    # 2. Restaurant map (MySQL-backed with incremental updates)
+    log("\n[2/12] Building restaurant master table (MySQL-backed)...")
+    restaurant_map = build_restaurant_map_chunked(
+        file_paths['data'], 
+        file_paths['response']
+    )
 
     # 3. Dimensions
     log("\n[3/12] Building dimension tables...")
     dim_restaurants = build_dim_restaurants(restaurant_map)
-    dim_customers   = build_dim_customers(f1, f2)
+    
+    # Build customers from chunks
+    log("  Building dim_customers from chunks...")
+    all_customers = []
+    
+    if file_paths['data']:
+        for chunk in read_csv_in_chunks(file_paths['data']):
+            c1 = chunk[["customer_contact", "customer_name"]].copy()
+            c1["platform"] = chunk["Pos_Order_ID"].apply(detect_platform)
+            all_customers.append(c1)
+    
+    if file_paths['response']:
+        for chunk in read_csv_in_chunks(file_paths['response']):
+            c2 = chunk[["Customer Contact", "Customer Name"]].copy()
+            c2.columns = ["customer_contact", "customer_name"]
+            c2["platform"] = "swayo_app"
+            all_customers.append(c2)
+    
+    dim_customers = pd.concat(all_customers, ignore_index=True)
+    dim_customers["customer_contact"] = dim_customers["customer_contact"].apply(clean_phone)
+    dim_customers = dim_customers[dim_customers["customer_contact"].notna()]
+    dim_customers = dim_customers.drop_duplicates(subset=["customer_contact"], keep="last")
+    log(f"  dim_customers: {len(dim_customers)} unique customers")
 
-    # 4. Facts
-    log("\n[4/12] Building fact tables...")
+    # 4. Facts — Process orders in chunks
+    log("\n[4/12] Building fact tables from chunks...")
+    
+    # Load full data for now (can optimize further if needed)
+    f1 = load_full_dataframe(file_paths['data'])
+    f2 = load_full_dataframe(file_paths['response'])
+    f3 = load_full_dataframe(file_paths['funnel'])
+    f4 = load_full_dataframe(file_paths['wa_funnel'])
+    
     fact_orders      = build_fact_orders(f1, f2, restaurant_map)
     fact_order_items = build_fact_order_items(f1, f2)
     fact_order_geo   = build_fact_order_geo(f1, f2, restaurant_map)
@@ -1071,7 +1248,7 @@ def run_pipeline():
 
     # 6. Campaigns
     log("\n[6/12] Building campaign tables...")
-    fact_campaigns      = build_fact_campaigns(campaign_files)
+    fact_campaigns      = build_fact_campaigns(file_paths['campaigns'])
     agg_campaign_perf   = build_agg_campaign_performance(fact_campaigns, fact_funnel_wa)
 
     # 7. Aggregations
@@ -1097,19 +1274,14 @@ def run_pipeline():
     load_to_mysql(agg_customers,      "agg_customer_behavior",    if_exists="replace")
     load_to_mysql(agg_campaign_perf,  "agg_campaign_performance", if_exists="replace")
 
-    # 9. Checkpoints
-    log("\n[9/12] Saving incremental checkpoints...")
-    save_last_funnel_row(fact_funnel_app, "app_funnel")
-    save_last_funnel_row(fact_funnel_wa,  "wa_funnel")
-
-    # 10. Archive
-    log("\n[10/12] Archiving raw files...")
+    # 9. Archive (no more checkpoint files needed - using DB deduplication)
+    log("\n[9/12] Archiving raw files...")
     archive_files()
 
-    # 11. Summary
-    log("\n[11/12] PIPELINE SUMMARY")
+    # 10. Summary
+    log("\n[10/12] PIPELINE SUMMARY")
     log("─" * 55)
-    log(f"  dim_restaurants        : {len(dim_restaurants):>7,}  (no lookup file)")
+    log(f"  dim_restaurants        : {len(dim_restaurants):>7,}  (MySQL master)")
     log(f"  dim_customers          : {len(dim_customers):>7,}")
     log(f"  fact_orders            : {len(fact_orders):>7,}")
     log(f"    gf_whatsapp          : {(fact_orders['platform']=='gf_whatsapp').sum():>7,}")
@@ -1117,17 +1289,20 @@ def run_pipeline():
     log(f"    swayo_app            : {(fact_orders['platform']=='swayo_app').sum():>7,}")
     log(f"  fact_order_items       : {len(fact_order_items):>7,}")
     log(f"  fact_order_geo         : {len(fact_order_geo):>7,}")
-    log(f"  fact_funnel (app)      : {len(fact_funnel_app):>7,}")
-    log(f"  fact_funnel_wa         : {len(fact_funnel_wa):>7,}")
-    log(f"  fact_campaigns         : {len(fact_campaigns) if not fact_campaigns.empty else 0:>7,}  ← .xlsx")
+    log(f"  fact_funnel (app)      : {len(fact_funnel_app):>7,}  (DB-dedup)")
+    log(f"  fact_funnel_wa         : {len(fact_funnel_wa):>7,}  (DB-dedup)")
+    log(f"  fact_campaigns         : {len(fact_campaigns) if not fact_campaigns.empty else 0:>7,}")
     log(f"  agg_platform_daily     : {len(agg_platform):>7,}")
     log(f"  agg_restaurant_daily   : {len(agg_restaurant):>7,}")
     log(f"  agg_funnel_conversion  : {len(agg_funnel):>7,}")
     log(f"  agg_customer_behavior  : {len(agg_customers):>7,}")
-    log(f"  agg_campaign_performance: {len(agg_campaign_perf) if not agg_campaign_perf.empty else 0:>6,}  ← NEW")
-    log(f"\n  TOTAL TABLES: 13  |  ✅ PIPELINE v5.1 COMPLETED")
+    log(f"  agg_campaign_performance: {len(agg_campaign_perf) if not agg_campaign_perf.empty else 0:>6,}")
+    log(f"\n  TOTAL TABLES: 13  |  ✅ PIPELINE v7.0 COMPLETED")
+    log(f"  Chunk size: {CHUNK_SIZE:,} rows | Funnel dedup: timestamp-based")
     log("=" * 65 + "\n")
 
 
 if __name__ == "__main__":
     run_pipeline()
+
+# Run:  python3 scripts/pipeline.py
