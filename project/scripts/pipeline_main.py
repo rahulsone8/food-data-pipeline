@@ -1,52 +1,10 @@
-"""
-=============================================================================
- FOOD DELIVERY ANALYTICS PIPELINE — v7.0
-=============================================================================
- Changes from v6.0:
-   1. CHUNK-BASED PROCESSING: All CSV files read in configurable chunks
-      (default: 10,000 rows) for memory efficiency
-   
-   2. MYSQL-BACKED RESTAURANT MASTER: dim_restaurants now persists in MySQL
-      with incremental UPSERT logic. New restaurants auto-added each run.
-      Same restaurant name allowed if different shop_id.
-   
-   3. TIMESTAMP-BASED FUNNEL DEDUPLICATION: Fixed data loss issue in
-      fact_funnel and fact_funnel_wa. Now uses composite keys
-      (timestamp|action|customer|shop) instead of row_id checkpoints.
-   
-   4. SHOP_ID SIMPLIFIED: Removed extract_shop_id_from_onboarded().
-      Provider_ID column in data*.csv IS shop_id directly.
-   
-   5. COUPON COLUMN: Explicit 'coupon' column added to fact_orders,
-      sourced from response.csv "Coupon Value".
-   
-   6. DELIVERY_TYPE CLARIFIED: In response*.csv, "online" = delivery order
-      (properly documented in code).
-
- MySQL tables (13 total):
-   dim_restaurants          one row per restaurant (shop_id PK) - MySQL master
-   dim_customers            one row per customer
-   fact_orders              one row per order — all platforms (with coupon column)
-   fact_order_items         one row per item
-   fact_order_geo           one row per order — location/distance data
-   fact_funnel              Swayo App funnel events (timestamp-dedup)
-   fact_funnel_wa           WhatsApp funnel events (timestamp-dedup)
-   fact_campaigns           one row per campaign message recipient
-   agg_platform_daily       daily KPIs by platform
-   agg_restaurant_daily     daily KPIs by restaurant
-   agg_funnel_conversion    Swayo App funnel conversion rates
-   agg_customer_behavior    customer loyalty segments
-   agg_campaign_performance campaign delivery + conversion KPIs
-=============================================================================
-"""
-
 import glob, logging, os, re, shutil
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+
 load_dotenv()
 
 # ─────────────────────────────────────────────────────────────────────────────
